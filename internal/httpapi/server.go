@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -69,6 +70,19 @@ type apiError struct {
 	Message string           `json:"message"`
 }
 
+type requestDecodeError struct {
+	message string
+	cause   error
+}
+
+func (e *requestDecodeError) Error() string {
+	return e.message
+}
+
+func (e *requestDecodeError) Unwrap() error {
+	return e.cause
+}
+
 func NewServer(transfers *service.TransferService, logger *log.Logger) *Server {
 	if logger == nil {
 		logger = log.New(io.Discard, "", 0)
@@ -100,7 +114,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateWallet(w http.ResponseWriter, r *http.Request) {
 	var request createWalletRequest
 	if err := decodeJSON(w, r, &request); err != nil {
-		s.writeError(w, http.StatusBadRequest, domain.ErrorInvalidRequest, err.Error())
+		s.writeDecodeError(w, err)
 		return
 	}
 
@@ -135,7 +149,7 @@ func (s *Server) handleGetWallet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateTransfer(w http.ResponseWriter, r *http.Request) {
 	var request createTransferRequest
 	if err := decodeJSON(w, r, &request); err != nil {
-		s.writeError(w, http.StatusBadRequest, domain.ErrorInvalidRequest, err.Error())
+		s.writeDecodeError(w, err)
 		return
 	}
 
@@ -174,15 +188,51 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(target); err != nil {
-		return err
+		return normalizeDecodeError(err)
 	}
 
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
-		return errors.New("request body must contain a single JSON object")
+		return newRequestDecodeError("request body must contain a single JSON object", err)
 	}
 
 	return nil
+}
+
+func normalizeDecodeError(err error) error {
+	var syntaxError *json.SyntaxError
+	var typeError *json.UnmarshalTypeError
+	var maxBytesError *http.MaxBytesError
+
+	switch {
+	case errors.Is(err, io.EOF):
+		return newRequestDecodeError("request body is required", err)
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return newRequestDecodeError("invalid JSON", err)
+	case errors.As(err, &syntaxError):
+		return newRequestDecodeError("invalid JSON", err)
+	case errors.As(err, &typeError):
+		if typeError.Field != "" {
+			return newRequestDecodeError(fmt.Sprintf("invalid value for field %q", typeError.Field), err)
+		}
+		return newRequestDecodeError("invalid JSON value", err)
+	case errors.As(err, &maxBytesError):
+		return newRequestDecodeError("request body is too large", err)
+	case strings.HasPrefix(err.Error(), "json: unknown field "):
+		field := strings.TrimPrefix(err.Error(), "json: unknown field ")
+		return newRequestDecodeError("unknown field "+field, err)
+	default:
+		return newRequestDecodeError("invalid request body", err)
+	}
+}
+
+func newRequestDecodeError(message string, cause error) error {
+	return &requestDecodeError{message: message, cause: cause}
+}
+
+func (s *Server) writeDecodeError(w http.ResponseWriter, err error) {
+	s.logger.Printf("decode JSON request: %v", errors.Unwrap(err))
+	s.writeError(w, http.StatusBadRequest, domain.ErrorInvalidRequest, err.Error())
 }
 
 func (s *Server) writeDomainError(w http.ResponseWriter, err error) {

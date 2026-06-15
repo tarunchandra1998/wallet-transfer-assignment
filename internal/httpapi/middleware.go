@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -29,6 +30,10 @@ func (r *statusRecorder) Write(body []byte) (int, error) {
 }
 
 func LoggingMiddleware(next http.Handler, logger *log.Logger) http.Handler {
+	if logger == nil {
+		logger = log.New(io.Discard, "", 0)
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		startedAt := time.Now()
 		recorder := &statusRecorder{ResponseWriter: w}

@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -42,6 +43,77 @@ func TestCreateTransferEndpointReturnsOriginalResultOnReplay(t *testing.T) {
 	}
 	if second.Body.String() != first.Body.String() {
 		t.Fatalf("replay body differs\nfirst: %s\nsecond: %s", first.Body.String(), second.Body.String())
+	}
+}
+
+func TestCreateTransferEndpointReturnsStableJSONDecodeErrors(t *testing.T) {
+	ctx := context.Background()
+	server := httpapi.NewServer(newHTTPTestService(t), log.New(io.Discard, "", 0))
+
+	tests := []struct {
+		name        string
+		body        string
+		wantMessage string
+	}{
+		{
+			name:        "empty body",
+			body:        "",
+			wantMessage: "request body is required",
+		},
+		{
+			name:        "invalid JSON",
+			body:        `{`,
+			wantMessage: "invalid JSON",
+		},
+		{
+			name:        "unknown field",
+			body:        `{"idempotencyKey":"key","fromWalletId":"wallet_1","toWalletId":"wallet_2","amount":100,"extra":true}`,
+			wantMessage: `unknown field "extra"`,
+		},
+		{
+			name:        "type mismatch",
+			body:        `{"idempotencyKey":"key","fromWalletId":"wallet_1","toWalletId":"wallet_2","amount":"100"}`,
+			wantMessage: `invalid value for field "amount"`,
+		},
+		{
+			name:        "multiple JSON objects",
+			body:        `{"idempotencyKey":"key","fromWalletId":"wallet_1","toWalletId":"wallet_2","amount":100}{}`,
+			wantMessage: "request body must contain a single JSON object",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			request := httptest.NewRequestWithContext(
+				ctx,
+				http.MethodPost,
+				"/transfers",
+				bytes.NewReader([]byte(tt.body)),
+			)
+
+			server.ServeHTTP(response, request)
+
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body: %s", response.Code, http.StatusBadRequest, response.Body.String())
+			}
+
+			var body struct {
+				Error struct {
+					Code    domain.ErrorCode `json:"code"`
+					Message string           `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+				t.Fatalf("decode response body: %v", err)
+			}
+			if body.Error.Code != domain.ErrorInvalidRequest {
+				t.Fatalf("error code = %s, want %s", body.Error.Code, domain.ErrorInvalidRequest)
+			}
+			if body.Error.Message != tt.wantMessage {
+				t.Fatalf("error message = %q, want %q", body.Error.Message, tt.wantMessage)
+			}
+		})
 	}
 }
 

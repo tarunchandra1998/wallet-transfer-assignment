@@ -99,7 +99,6 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 			FOREIGN KEY (transfer_id) REFERENCES transfers(id),
 			UNIQUE (transfer_id, entry_type)
 		);`,
-		`CREATE INDEX IF NOT EXISTS idx_transfers_idempotency_key ON transfers(idempotency_key);`,
 		`CREATE INDEX IF NOT EXISTS idx_transfers_from_wallet ON transfers(from_wallet_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_transfers_to_wallet ON transfers(to_wallet_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_ledger_entries_wallet ON ledger_entries(wallet_id);`,
@@ -158,7 +157,7 @@ func (tx *SQLiteTx) CreateWallet(ctx context.Context, wallet domain.Wallet) erro
 		formatTime(wallet.UpdatedAt),
 	)
 	if err != nil {
-		if isConstraintError(err) {
+		if isUniquenessConstraintError(err) {
 			return domain.NewAppError(domain.ErrorWalletAlreadyExists, "wallet already exists")
 		}
 		return fmt.Errorf("insert wallet: %w", err)
@@ -469,9 +468,14 @@ func parseTime(value string) (time.Time, error) {
 	return time.Parse(time.RFC3339Nano, value)
 }
 
-func isConstraintError(err error) bool {
+func isUniquenessConstraintError(err error) bool {
 	var sqliteErr sqlite3.Error
-	return errors.As(err, &sqliteErr) && sqliteErr.Code == sqlite3.ErrConstraint
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+
+	return sqliteErr.ExtendedCode == sqlite3.ErrConstraintPrimaryKey ||
+		sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique
 }
 
 func normalizeSQLiteDSN(dsn string) string {

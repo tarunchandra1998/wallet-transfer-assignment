@@ -160,12 +160,14 @@ func (s *TransferService) CreateTransfer(
 			return err
 		}
 
+		operationTime := s.clock().UTC()
+
 		_, sourceFound, err := repo.GetWallet(ctx, input.FromWalletID)
 		if err != nil {
 			return err
 		}
 		if !sourceFound {
-			return s.failTransfer(ctx, repo, transfer.ID, domain.ErrorSourceWalletNotFound, &result)
+			return s.failTransfer(ctx, repo, transfer.ID, domain.ErrorSourceWalletNotFound, operationTime, &result)
 		}
 
 		_, destinationFound, err := repo.GetWallet(ctx, input.ToWalletID)
@@ -173,18 +175,18 @@ func (s *TransferService) CreateTransfer(
 			return err
 		}
 		if !destinationFound {
-			return s.failTransfer(ctx, repo, transfer.ID, domain.ErrorDestinationWalletNotFound, &result)
+			return s.failTransfer(ctx, repo, transfer.ID, domain.ErrorDestinationWalletNotFound, operationTime, &result)
 		}
 
-		debited, err := repo.DebitWallet(ctx, input.FromWalletID, input.Amount, s.clock().UTC())
+		debited, err := repo.DebitWallet(ctx, input.FromWalletID, input.Amount, operationTime)
 		if err != nil {
 			return err
 		}
 		if !debited {
-			return s.failTransfer(ctx, repo, transfer.ID, domain.ErrorInsufficientFunds, &result)
+			return s.failTransfer(ctx, repo, transfer.ID, domain.ErrorInsufficientFunds, operationTime, &result)
 		}
 
-		if err = repo.CreditWallet(ctx, input.ToWalletID, input.Amount, s.clock().UTC()); err != nil {
+		if err = repo.CreditWallet(ctx, input.ToWalletID, input.Amount, operationTime); err != nil {
 			return err
 		}
 
@@ -194,14 +196,14 @@ func (s *TransferService) CreateTransfer(
 				TransferID: transfer.ID,
 				Type:       domain.LedgerDebit,
 				Amount:     input.Amount,
-				CreatedAt:  s.clock().UTC(),
+				CreatedAt:  operationTime,
 			},
 			{
 				WalletID:   input.ToWalletID,
 				TransferID: transfer.ID,
 				Type:       domain.LedgerCredit,
 				Amount:     input.Amount,
-				CreatedAt:  s.clock().UTC(),
+				CreatedAt:  operationTime,
 			},
 		}
 		if err = repo.InsertLedgerEntries(ctx, entries); err != nil {
@@ -213,7 +215,7 @@ func (s *TransferService) CreateTransfer(
 			transfer.ID,
 			domain.TransferProcessed,
 			"",
-			s.clock().UTC(),
+			operationTime,
 		)
 		if err != nil {
 			return err
@@ -242,6 +244,7 @@ func (s *TransferService) failTransfer(
 	repo ports.TransferRepository,
 	transferID string,
 	errorCode domain.ErrorCode,
+	updatedAt time.Time,
 	result *domain.TransferResult,
 ) error {
 	failedTransfer, err := repo.UpdateTransferState(
@@ -249,7 +252,7 @@ func (s *TransferService) failTransfer(
 		transferID,
 		domain.TransferFailed,
 		errorCode,
-		s.clock().UTC(),
+		updatedAt,
 	)
 	if err != nil {
 		return err
