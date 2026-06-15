@@ -12,6 +12,51 @@ import (
 	"wallet-transfer-assignment/internal/ports"
 )
 
+func TestTransactionHelpersApplyConnectionPragmas(t *testing.T) {
+	ctx := context.Background()
+	store := newTestSQLiteStore(t)
+
+	tests := []struct {
+		name string
+		run  func(context.Context, func(context.Context, ports.TransferRepository) error) error
+	}{
+		{name: "write transaction", run: store.WithTx},
+		{name: "read transaction", run: store.WithReadTx},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.run(ctx, func(ctx context.Context, repo ports.TransferRepository) error {
+				tx, ok := repo.(*SQLiteTx)
+				if !ok {
+					t.Fatalf("repo type = %T, want *SQLiteTx", repo)
+				}
+
+				var foreignKeys int
+				if err := tx.conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&foreignKeys); err != nil {
+					t.Fatalf("query foreign_keys pragma: %v", err)
+				}
+				if foreignKeys != 1 {
+					t.Fatalf("foreign_keys pragma = %d, want 1", foreignKeys)
+				}
+
+				var busyTimeout int
+				if err := tx.conn.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
+					t.Fatalf("query busy_timeout pragma: %v", err)
+				}
+				if busyTimeout != sqliteBusyTimeoutMillis {
+					t.Fatalf("busy_timeout pragma = %d, want %d", busyTimeout, sqliteBusyTimeoutMillis)
+				}
+
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("transaction returned error: %v", err)
+			}
+		})
+	}
+}
+
 func TestCreateWalletMapsOnlyUniquenessConstraintToAlreadyExists(t *testing.T) {
 	ctx := context.Background()
 	store := newTestSQLiteStore(t)
@@ -59,7 +104,7 @@ func newTestSQLiteStore(t *testing.T) *SQLiteStore {
 
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "wallet.db")
-	store, err := OpenSQLite(ctx, fmt.Sprintf("file:%s?_busy_timeout=5000&_foreign_keys=on", dbPath))
+	store, err := OpenSQLite(ctx, fmt.Sprintf("file:%s", dbPath))
 	if err != nil {
 		t.Fatalf("OpenSQLite returned error: %v", err)
 	}

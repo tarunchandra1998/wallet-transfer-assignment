@@ -9,6 +9,7 @@ import (
 
 type TransactionalStore interface {
 	WithTx(context.Context, func(context.Context, TransferRepository) error) error
+	WithReadTx(context.Context, func(context.Context, TransferRepository) error) error
 }
 
 type TransferRepository interface {

@@ -22,8 +22,14 @@ type SQLiteTx struct {
 	conn *sql.Conn
 }
 
+const sqliteBusyTimeoutMillis = 5000
+
 type scanner interface {
 	Scan(dest ...any) error
+}
+
+type sqlitePragmaExecutor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
 func OpenSQLite(ctx context.Context, dsn string) (*SQLiteStore, error) {
@@ -38,12 +44,12 @@ func OpenSQLite(ctx context.Context, dsn string) (*SQLiteStore, error) {
 	db.SetMaxIdleConns(8)
 	db.SetConnMaxLifetime(30 * time.Minute)
 
-	if _, err = db.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
+	if err = applySQLiteConnectionPragmas(ctx, db); err != nil {
 		closeErr := db.Close()
 		if closeErr != nil {
-			return nil, fmt.Errorf("enable foreign keys: %w; close db: %v", err, closeErr)
+			return nil, fmt.Errorf("configure sqlite connection pragmas: %w; close db: %v", err, closeErr)
 		}
-		return nil, fmt.Errorf("enable foreign keys: %w", err)
+		return nil, fmt.Errorf("configure sqlite connection pragmas: %w", err)
 	}
 	if _, err = db.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err != nil {
 		closeErr := db.Close()
@@ -51,13 +57,6 @@ func OpenSQLite(ctx context.Context, dsn string) (*SQLiteStore, error) {
 			return nil, fmt.Errorf("enable wal: %w; close db: %v", err, closeErr)
 		}
 		return nil, fmt.Errorf("enable wal: %w", err)
-	}
-	if _, err = db.ExecContext(ctx, "PRAGMA busy_timeout = 5000"); err != nil {
-		closeErr := db.Close()
-		if closeErr != nil {
-			return nil, fmt.Errorf("set busy timeout: %w; close db: %v", err, closeErr)
-		}
-		return nil, fmt.Errorf("set busy timeout: %w", err)
 	}
 
 	return &SQLiteStore{db: db}, nil
@@ -115,6 +114,14 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 }
 
 func (s *SQLiteStore) WithTx(ctx context.Context, fn func(context.Context, ports.TransferRepository) error) error {
+	return s.withTx(ctx, "BEGIN IMMEDIATE", fn)
+}
+
+func (s *SQLiteStore) WithReadTx(ctx context.Context, fn func(context.Context, ports.TransferRepository) error) error {
+	return s.withTx(ctx, "BEGIN", fn)
+}
+
+func (s *SQLiteStore) withTx(ctx context.Context, beginStatement string, fn func(context.Context, ports.TransferRepository) error) error {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire sqlite connection: %w", err)
@@ -123,7 +130,11 @@ func (s *SQLiteStore) WithTx(ctx context.Context, fn func(context.Context, ports
 		_ = conn.Close()
 	}()
 
-	if _, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+	if err = applySQLiteConnectionPragmas(ctx, conn); err != nil {
+		return fmt.Errorf("configure sqlite connection pragmas: %w", err)
+	}
+
+	if _, err = conn.ExecContext(ctx, beginStatement); err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 
@@ -466,6 +477,20 @@ func formatTime(t time.Time) string {
 
 func parseTime(value string) (time.Time, error) {
 	return time.Parse(time.RFC3339Nano, value)
+}
+
+func applySQLiteConnectionPragmas(ctx context.Context, execer sqlitePragmaExecutor) error {
+	if _, err := execer.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
+		return fmt.Errorf("enable foreign keys: %w", err)
+	}
+	if _, err := execer.ExecContext(
+		ctx,
+		fmt.Sprintf("PRAGMA busy_timeout = %d", sqliteBusyTimeoutMillis),
+	); err != nil {
+		return fmt.Errorf("set busy timeout: %w", err)
+	}
+
+	return nil
 }
 
 func isUniquenessConstraintError(err error) bool {

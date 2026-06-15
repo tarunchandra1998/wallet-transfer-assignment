@@ -179,6 +179,42 @@ func TestCreateTransferMissingDestinationIsDurableFailure(t *testing.T) {
 	assertWalletBalance(t, transferService, "wallet_1", 50)
 }
 
+func TestCreateTransferMissingSourceIsDurableFailure(t *testing.T) {
+	ctx := context.Background()
+	transferService := newTestService(t)
+	mustCreateWallet(t, transferService, "wallet_2", 50)
+
+	input := domain.CreateTransferInput{
+		IdempotencyKey: "key-missing-source",
+		FromWalletID:   "missing_wallet",
+		ToWalletID:     "wallet_2",
+		Amount:         25,
+	}
+	first, err := transferService.CreateTransfer(ctx, input)
+	if err != nil {
+		t.Fatalf("CreateTransfer returned error: %v", err)
+	}
+	if first.Transfer.State != domain.TransferFailed {
+		t.Fatalf("transfer state = %s, want %s", first.Transfer.State, domain.TransferFailed)
+	}
+	if first.Transfer.ErrorCode != domain.ErrorSourceWalletNotFound {
+		t.Fatalf("error code = %s, want %s", first.Transfer.ErrorCode, domain.ErrorSourceWalletNotFound)
+	}
+	if len(first.LedgerEntries) != 0 {
+		t.Fatalf("ledger entry count = %d, want 0", len(first.LedgerEntries))
+	}
+
+	second, err := transferService.CreateTransfer(ctx, input)
+	if err != nil {
+		t.Fatalf("replay CreateTransfer returned error: %v", err)
+	}
+	if second.Transfer.ID != first.Transfer.ID {
+		t.Fatalf("replay transfer id = %s, want %s", second.Transfer.ID, first.Transfer.ID)
+	}
+
+	assertWalletBalance(t, transferService, "wallet_2", 50)
+}
+
 func TestConcurrentTransfersDoNotOverspend(t *testing.T) {
 	ctx := context.Background()
 	transferService := newTestService(t)

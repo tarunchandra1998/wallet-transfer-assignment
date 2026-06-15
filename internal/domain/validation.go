@@ -38,7 +38,7 @@ func NormalizeCreateWalletInput(input CreateWalletInput) CreateWalletInput {
 func ValidateCreateWalletInput(input CreateWalletInput) error {
 	switch {
 	case input.ID == "":
-		return NewAppError(ErrorInvalidRequest, "wallet id is required")
+		return NewAppError(ErrorInvalidRequest, "id is required")
 	case input.InitialBalance < 0:
 		return NewAppError(ErrorInvalidRequest, "initialBalance cannot be negative")
 	default:

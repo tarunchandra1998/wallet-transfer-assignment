@@ -53,7 +53,7 @@ func (s *TransferService) CreateWallet(ctx context.Context, input domain.CreateW
 func (s *TransferService) GetWallet(ctx context.Context, id string) (domain.Wallet, error) {
 	var wallet domain.Wallet
 
-	err := s.store.WithTx(ctx, func(ctx context.Context, repo ports.TransferRepository) error {
+	err := s.store.WithReadTx(ctx, func(ctx context.Context, repo ports.TransferRepository) error {
 		foundWallet, found, err := repo.GetWallet(ctx, id)
 		if err != nil {
 			return err
@@ -74,7 +74,7 @@ func (s *TransferService) GetWallet(ctx context.Context, id string) (domain.Wall
 func (s *TransferService) GetTransfer(ctx context.Context, id string) (domain.TransferResult, error) {
 	var result domain.TransferResult
 
-	err := s.store.WithTx(ctx, func(ctx context.Context, repo ports.TransferRepository) error {
+	err := s.store.WithReadTx(ctx, func(ctx context.Context, repo ports.TransferRepository) error {
 		transfer, found, err := repo.FindTransferByID(ctx, id)
 		if err != nil {
 			return err
