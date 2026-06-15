@@ -46,16 +46,13 @@ I did not rely on AI output alone for correctness. The implementation was checke
 
 The user prompts in this session were:
 
-1. `Hi`
-2. `what is context for yoy`
-3. `which folder`
-4. `observe the repo and tell me what to do`
-5. `ok do the /Users/tchandra/workspace_my/wallet-task/wallet-transfer-assignment/ASSIGNMENT.md but take care of other instruction in the repo`
-6. `have you done with all the requirement`
-7. `do this also Only remaining non-code items are submission/admin things: fill the PR template’s AI disclosure section and ensure GitHub repo variables like LINT_CMD, FORMAT_CHECK_CMD, and TEST_CMD are configured. if it is required from candidate side`
-8. `this was the message from the company ...`
-9. `are you sure`
-10. `mention more about the ai disclosure`
+1. Observe the repository and explain the assignment requirements and repository instructions.
+2. Suggest an architecture for a wallet transfer service with idempotency, concurrency control, and double-entry ledger support.
+3. Design the database schema for wallets, transfers, ledger entries, and idempotency records.
+4. Explain how to implement idempotency and prevent double spending during concurrent transfers.
+5. Generate edge cases and test scenarios for wallet transfers.
+6. Review the implementation against the assignment requirements and identify any missing concerns.
+7. Help improve the PR documentation for schema design, idempotency, and concurrency strategies.
 
 ## Work Performed With AI Assistance
 
